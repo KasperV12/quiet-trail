@@ -32,6 +32,7 @@ var fire_button: Button
 var sound_button: Button
 var ambience_player: AudioStreamPlayer
 var audio_enabled := true
+var closing := false
 var card_style: StyleBoxFlat
 var main_font: Font
 
@@ -45,9 +46,19 @@ func _ready() -> void:
 	state.encountered.connect(_on_encountered)
 	_update_ui()
 	_load_audio_setting()
-	_start_ambience()
+	if DisplayServer.get_name() != "headless":
+		_start_ambience()
 	_show_title_screen()
 	get_viewport().size_changed.connect(_on_viewport_resized)
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and not closing:
+		closing = true
+		get_tree().set_auto_accept_quit(false)
+		if is_instance_valid(ambience_player):
+			ambience_player.stop()
+		await get_tree().create_timer(0.12).timeout
+		get_tree().quit()
 
 func _build_ui() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -487,10 +498,17 @@ func _update_ui() -> void:
 	if not is_instance_valid(time_label):
 		return
 	time_label.text = "День %d  ·  %s" % [state.day_number(), state.clock_text()]
-	weather_label.text = "☁  " + state.weather_text()
+	var weather_icon := "☁"
+	if state.campaign_chapter == 1:
+		weather_icon = "↟"
+	elif state.campaign_chapter >= 2:
+		weather_icon = "❄"
+	weather_label.text = weather_icon + "  " + state.weather_text()
 	region_label.text = state.current_region()
 	var chapter_names := ["СИГНАЛ", "ОСКОЛКИ", "СЛЕДОПЫТ"]
 	chapter_hint_label.text = ["Найди модуль в старой обсерватории и вернись в лагерь.", "Собери три осколка сигнала и вернись с записями.", "Найди пропавшего следопыта и доберись с ним до лагеря."][mini(state.campaign_chapter, 2)]
+	if state.campaign_chapter == 2 and state.survivor_found:
+		chapter_hint_label.text = "Доставь следопыта в лагерь." if state.survivor_rescued else "Вернись за поисковой группой по координатам."
 	if state.campaign_chapter < state.CHAPTER_COUNT:
 		chapter_label.text = "ГЛАВА %s  ·  %s" % [["I", "II", "III"][state.campaign_chapter], chapter_names[state.campaign_chapter]]
 	objective_label.text = state.objective_text()

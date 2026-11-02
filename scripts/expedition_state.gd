@@ -76,16 +76,8 @@ func _reset_expedition() -> void:
 	grid.clear()
 	for y in range(MAP_H):
 		for x in range(MAP_W):
-			var roll := rng.randf()
-			var kind := "forest"
-			if roll < 0.17:
-				kind = "clearing"
-			elif roll < 0.25:
-				kind = "stream"
-			elif roll < 0.36:
-				kind = "ridge"
-			elif roll < 0.43:
-				kind = "bog"
+			var cell := Vector2i(x, y)
+			var kind := _generate_terrain(cell, rng.randf())
 			grid.append({"kind": kind, "seen": false, "visited": false, "found": ""})
 	_set_tile(CAMP, "camp", "")
 	_set_tile(OBSERVATORY, "ruin", "module" if campaign_chapter == 0 else "")
@@ -128,6 +120,26 @@ func _tile(cell: Vector2i) -> Dictionary:
 
 func _set_tile(cell: Vector2i, kind: String, found: String) -> void:
 	grid[_index(cell)] = {"kind": kind, "seen": false, "visited": false, "found": found}
+
+func _generate_terrain(cell: Vector2i, roll: float) -> String:
+	var northness := 1.0 - float(cell.y) / float(MAP_H - 1)
+	if campaign_chapter == 0:
+		if roll < 0.17: return "clearing"
+		if roll < 0.25: return "stream"
+		if roll < 0.36: return "ridge"
+		if roll < 0.43: return "bog"
+		return "forest"
+	if campaign_chapter == 1:
+		if northness > 0.48 and roll < 0.58: return "ridge"
+		if roll < 0.13: return "stream"
+		if roll < 0.21: return "bog"
+		if roll < 0.38: return "clearing"
+		return "forest"
+	if northness > 0.38 and roll < 0.66: return "ridge"
+	if roll < 0.25: return "bog"
+	if roll < 0.36: return "stream"
+	if roll < 0.47: return "clearing"
+	return "forest"
 
 func _place_find(found: String, allowed_kinds: Array) -> void:
 	var candidates: Array[Vector2i] = []
@@ -183,6 +195,14 @@ func current_region() -> String:
 	return labels.get(kind, "Северный лес")
 
 func weather_text() -> String:
+	if campaign_chapter == 1:
+		if elapsed > 8: return "Порывы с перевала"
+		if elapsed > 4: return "Ветер набирает силу"
+		return "Холодный воздух с севера"
+	if campaign_chapter >= 2:
+		if elapsed > 8: return "Белая мгла"
+		if elapsed > 4: return "Снег режет глаза"
+		return "Снег идёт стеной"
 	if elapsed > 11:
 		return "Сумерки сгущаются"
 	if elapsed > 6:
@@ -208,16 +228,25 @@ func move(delta: Vector2i) -> void:
 	elapsed += 1
 	_tile(position)["visited"] = true
 	_reveal()
-	if _tile(position)["kind"] == "bog" and rng.randf() < 0.28:
+	var terrain: String = _tile(position)["kind"]
+	var hazard_chance := 0.0
+	if terrain == "bog":
+		hazard_chance = 0.28 if campaign_chapter == 0 else 0.38
+	elif terrain == "ridge" and campaign_chapter >= 1:
+		hazard_chance = 0.20 if campaign_chapter == 1 else 0.30
+	if rng.randf() < hazard_chance:
 		energy = maxi(0, energy - 1)
-		_add_log("Мшистая низина затянула сапог. Потеряна выносливость.")
+		var hazard_lines := {"bog": "Мшистая низина затянула сапог. Потеряна выносливость.", "ridge": "Порыв ветра сбил дыхание на открытом гребне. Потеряна выносливость."}
+		_add_log(hazard_lines.get(terrain, "Путь отнял силы."))
 	_collect()
 	if position == CAMP and _objective_complete():
 		_finish(true)
 		return
 	if energy <= 0:
 		if position == CAMP:
-			_finish(false, "Возвращение без модуля", "Ты добрался до лагеря, но маяк пока молчит. Можно подготовиться и отправиться снова.", "◉")
+			var camp_failure_titles := ["Возвращение без модуля", "Сигнал не восстановлен", "Поисковая группа не найдена"]
+			var camp_failure_bodies := ["Ты добрался до лагеря, но маяк пока молчит. Можно подготовиться и отправиться снова.", "Ты вернулся, не собрав нужные фрагменты. Перед следующей попыткой можно подготовить припасы.", "Ты вернулся за помощью, но сил и времени на поиски не хватило. Следопыт всё ещё в горах."]
+			_finish(false, camp_failure_titles[campaign_chapter], camp_failure_bodies[campaign_chapter], "◉")
 		else:
 			_finish(false, "Лес погрузился в туман", "Силы закончились прежде, чем удалось вернуться. Лагерь пришлёт поисковую группу на рассвете.", "…")
 		return

@@ -22,15 +22,36 @@ var pulse := 0.0
 var map_rect := Rect2()
 var cell_size := Vector2.ZERO
 var map_origin := Vector2.ZERO
+var player_visual_pos := Vector2.ZERO
+var player_move_from := Vector2.ZERO
+var player_move_to := Vector2.ZERO
+var player_move_time := 1.0
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(650, 520)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	if state != null:
+		player_visual_pos = Vector2(state.position)
+		player_move_from = player_visual_pos
+		player_move_to = player_visual_pos
+		state.changed.connect(_on_state_changed)
 	set_process(true)
 
 func _process(delta: float) -> void:
 	pulse += delta
+	if player_move_time < 1.0:
+		player_move_time = minf(1.0, player_move_time + delta / 0.19)
+		var t := player_move_time * player_move_time * (3.0 - 2.0 * player_move_time)
+		player_visual_pos = player_move_from.lerp(player_move_to, t)
 	queue_redraw()
+
+func _on_state_changed() -> void:
+	var next_position := Vector2(state.position)
+	if next_position == player_move_to:
+		return
+	player_move_from = player_visual_pos
+	player_move_to = next_position
+	player_move_time = 0.0
 
 func _draw() -> void:
 	var bounds := Rect2(Vector2.ZERO, size)
@@ -76,6 +97,10 @@ func _draw_ground(rect: Rect2, cell: Vector2i, kind: String, seen: bool) -> void
 			"ruin":
 				texture = STONE_TILE
 				tint = Color("#e4ddc5")
+		if state.campaign_chapter == 1:
+			tint = tint.lerp(Color("#c5c4ac"), .10)
+		elif state.campaign_chapter >= 2:
+			tint = tint.lerp(Color("#bfd0d7"), .23)
 		draw_texture_rect(texture, rect.grow(-0.8), false, tint)
 		draw_rect(Rect2(rect.position + Vector2(1, 1), Vector2(rect.size.x - 2, 1.1)), Color(1, 0.95, 0.78, .15))
 	else:
@@ -251,7 +276,7 @@ func _draw_trail() -> void:
 				draw_line(a, b, Color("#e3ca91", .25), 2.2, true)
 
 func _draw_player() -> void:
-	var p := map_origin + (Vector2(state.position) + Vector2(.5, .5)) * cell_size
+	var p := map_origin + (player_visual_pos + Vector2(.5, .5)) * cell_size
 	var s := cell_size.x
 	var bob := sin(pulse * 3.0) * s * .012
 	draw_circle(p + Vector2(0, s * .24), s * .25, Color("#101712", .38))
