@@ -3,6 +3,7 @@ extends Control
 const ExpeditionStateScript = preload("res://scripts/expedition_state.gd")
 const ExpeditionMapScript = preload("res://scripts/world_view.gd")
 const SAVE_PATH := "user://lantern_trail_save.json"
+const SETTINGS_PATH := "user://lantern_trail_settings.json"
 
 var state: ExpeditionState
 var map_view
@@ -28,6 +29,9 @@ var rest_button: Button
 var return_button: Button
 var food_button: Button
 var fire_button: Button
+var sound_button: Button
+var ambience_player: AudioStreamPlayer
+var audio_enabled := true
 var card_style: StyleBoxFlat
 var main_font: Font
 
@@ -40,6 +44,8 @@ func _ready() -> void:
 	state.finished.connect(_on_finished)
 	state.encountered.connect(_on_encountered)
 	_update_ui()
+	_load_audio_setting()
+	_start_ambience()
 	_show_title_screen()
 	get_viewport().size_changed.connect(_on_viewport_resized)
 
@@ -104,6 +110,9 @@ func _build_header(parent: VBoxContainer) -> void:
 	row.add_child(time_label)
 	var pause := _small_button("Ⅱ  ПАУЗА")
 	pause.pressed.connect(_show_pause)
+	sound_button = _small_button("♫ ЗВУК")
+	sound_button.pressed.connect(_toggle_audio)
+	row.add_child(sound_button)
 	row.add_child(pause)
 
 func _build_hero(parent: VBoxContainer) -> void:
@@ -410,6 +419,39 @@ func _save_game() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(state.to_dict()))
+
+func _start_ambience() -> void:
+	var stream := load("res://assets/audio/Forest_Ambience.mp3") as AudioStreamMP3
+	if stream == null:
+		return
+	stream.loop = true
+	ambience_player = AudioStreamPlayer.new()
+	ambience_player.stream = stream
+	ambience_player.volume_db = -13.0 if audio_enabled else -80.0
+	add_child(ambience_player)
+	ambience_player.play()
+
+func _load_audio_setting() -> void:
+	if FileAccess.file_exists(SETTINGS_PATH):
+		var file := FileAccess.open(SETTINGS_PATH, FileAccess.READ)
+		if file != null:
+			var settings: Variant = JSON.parse_string(file.get_as_text())
+			if settings is Dictionary:
+				audio_enabled = bool(settings.get("ambience", true))
+	_apply_audio_setting()
+
+func _apply_audio_setting() -> void:
+	if is_instance_valid(ambience_player):
+		ambience_player.volume_db = -13.0 if audio_enabled else -80.0
+	if is_instance_valid(sound_button):
+		sound_button.text = "♫ ЗВУК" if audio_enabled else "♫ ВЫКЛ"
+
+func _toggle_audio() -> void:
+	audio_enabled = not audio_enabled
+	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify({"ambience": audio_enabled}))
+	_apply_audio_setting()
 
 func _load_game() -> void:
 	if not FileAccess.file_exists(SAVE_PATH):
