@@ -5,6 +5,12 @@ const ExpeditionMapScript = preload("res://scripts/world_view.gd")
 const TitleArtScript = preload("res://scripts/title_art.gd")
 const SAVE_PATH := "user://lantern_trail_save.json"
 const SETTINGS_PATH := "user://lantern_trail_settings.json"
+const REBINDABLE_ACTIONS := {
+	"move_up": "Идти вверх", "move_down": "Идти вниз",
+	"move_left": "Идти влево", "move_right": "Идти вправо",
+	"expedition_rest": "Отдых", "expedition_food": "Съесть еду",
+	"expedition_fire": "Разжечь костёр", "expedition_return": "К лагерю"
+}
 
 var state: ExpeditionState
 var map_view
@@ -35,6 +41,9 @@ var ambience_player: AudioStreamPlayer
 var audio_enabled := true
 var ambience_volume := 0.65
 var reduced_motion := false
+var keyboard_bindings: Dictionary = {}
+var remapping_action := ""
+var remapping_settings_from_pause := false
 var closing := false
 var card_style: StyleBoxFlat
 var main_font: Font
@@ -186,7 +195,7 @@ func _build_body(parent: VBoxContainer) -> void:
 	map_view.cell_selected.connect(_on_cell_selected)
 	map_view.notice.connect(_show_notice)
 	map_column.add_child(map_view)
-	var map_help := _label("КЛИК ПО СОСЕДНЕМУ УЧАСТКУ   ·   WASD / СТРЕЛКИ / ЛЕВЫЙ СТИК — ДВИЖЕНИЕ", 9, Color("#99a694"))
+	var map_help := _label("КЛИК ПО СОСЕДНЕМУ УЧАСТКУ   ·   КЛАВИШИ / СТРЕЛКИ / ЛЕВЫЙ СТИК — ДВИЖЕНИЕ", 9, Color("#99a694"))
 	map_column.add_child(map_help)
 	var side := VBoxContainer.new()
 	side.custom_minimum_size.x = 292
@@ -464,6 +473,14 @@ func _load_audio_setting() -> void:
 				audio_enabled = bool(settings.get("ambience", true))
 				ambience_volume = clampf(float(settings.get("ambience_volume", 0.65)), 0.0, 1.0)
 				reduced_motion = bool(settings.get("reduced_motion", false))
+				var saved_keyboard: Variant = settings.get("keyboard", {})
+				if saved_keyboard is Dictionary:
+					for action_value in saved_keyboard:
+						var action_name := str(action_value)
+						if REBINDABLE_ACTIONS.has(action_name):
+							var key_code := int(saved_keyboard[action_value])
+							if key_code > 0:
+								_set_keyboard_binding(action_name, key_code)
 	if is_instance_valid(map_view):
 		map_view.reduced_motion = reduced_motion
 	_apply_audio_setting()
@@ -482,7 +499,27 @@ func _toggle_audio() -> void:
 func _save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if file != null:
-		file.store_string(JSON.stringify({"ambience": audio_enabled, "ambience_volume": ambience_volume, "reduced_motion": reduced_motion}))
+		file.store_string(JSON.stringify({"ambience": audio_enabled, "ambience_volume": ambience_volume, "reduced_motion": reduced_motion, "keyboard": keyboard_bindings}))
+
+func _keyboard_binding_name(action: String) -> String:
+	for event: InputEvent in InputMap.action_get_events(action):
+		if event is InputEventKey and event.physical_keycode != KEY_NONE:
+			return OS.get_keycode_string(event.physical_keycode)
+	return "—"
+
+func _set_keyboard_binding(action: String, key_code: int) -> void:
+	if not REBINDABLE_ACTIONS.has(action) or not InputMap.has_action(action):
+		return
+	for event: InputEvent in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			InputMap.action_erase_event(action, event)
+	InputMap.action_add_event(action, _key_binding(key_code))
+	keyboard_bindings[action] = key_code
+
+func _begin_key_remap(action: String, from_pause: bool, status_label: Label) -> void:
+	remapping_action = action
+	remapping_settings_from_pause = from_pause
+	status_label.text = "Нажмите клавишу для «%s» · Esc отмена" % REBINDABLE_ACTIONS[action]
 
 func _show_settings(from_pause: bool) -> void:
 	for child in overlay.get_children():
@@ -537,6 +574,22 @@ func _show_settings(from_pause: bool) -> void:
 		map_view.reduced_motion = enabled
 		_save_settings()
 		map_view.queue_redraw())
+	col.add_child(_label("КЛАВИШИ · НАЖМИТЕ ДЕЙСТВИЕ, ЗАТЕМ НОВУЮ КЛАВИШУ", 9, Color("#d1a766"), true))
+	var remap_hint := _label("Esc отменяет переназначение", 10, Color("#e2bd7e"))
+	remap_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(remap_hint)
+	var bindings_grid := GridContainer.new()
+	bindings_grid.columns = 2
+	bindings_grid.add_theme_constant_override("h_separation", 8)
+	bindings_grid.add_theme_constant_override("v_separation", 5)
+	col.add_child(bindings_grid)
+	for action_value in REBINDABLE_ACTIONS:
+		var action_name := str(action_value)
+		var binding_button := _small_button("%s  ·  %s" % [REBINDABLE_ACTIONS[action_name], _keyboard_binding_name(action_name)])
+		binding_button.custom_minimum_size = Vector2(211, 34)
+		binding_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		binding_button.pressed.connect(_begin_key_remap.bind(action_name, from_pause, remap_hint))
+		bindings_grid.add_child(binding_button)
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 9)
@@ -625,6 +678,20 @@ func _on_viewport_resized() -> void:
 		map_view.queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if remapping_action != "":
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_ESCAPE:
+				remapping_action = ""
+				_show_settings(remapping_settings_from_pause)
+			else:
+				var key_code := int(event.physical_keycode if event.physical_keycode != KEY_NONE else event.keycode)
+				if key_code > 0 and event.keycode not in [KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_META]:
+					_set_keyboard_binding(remapping_action, key_code)
+					remapping_action = ""
+					_save_settings()
+					_show_settings(remapping_settings_from_pause)
+			get_viewport().set_input_as_handled()
+		return
 	if overlay.visible:
 		if event.is_action_pressed("ui_cancel") and state.pending_encounter == "":
 			overlay.visible = false
@@ -690,7 +757,7 @@ func _add_action_bindings(action: String, bindings: Array) -> void:
 	for binding: InputEvent in bindings:
 		InputMap.action_add_event(action, binding)
 
-func _key_binding(code: Key) -> InputEventKey:
+func _key_binding(code: int) -> InputEventKey:
 	var event := InputEventKey.new()
 	event.physical_keycode = code
 	return event
