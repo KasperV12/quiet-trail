@@ -33,6 +33,7 @@ var survivor_found := false
 var survivor_rescued := false
 var echo_heard := false
 var relay_tuned := false
+var flare_lit := false
 var campaign_records: Array[String] = []
 var result_title := ""
 var result_body := ""
@@ -48,6 +49,7 @@ func reset() -> void:
 	campaign_records.clear()
 	echo_heard = false
 	relay_tuned = false
+	flare_lit = false
 	_reset_expedition()
 
 func retry_expedition() -> void:
@@ -74,6 +76,7 @@ func _reset_expedition() -> void:
 	fragments = 0
 	survivor_found = false
 	survivor_rescued = false
+	flare_lit = false
 	campfires.clear()
 	pending_encounter = ""
 	journal.clear()
@@ -100,6 +103,7 @@ func _reset_expedition() -> void:
 		for i in range(3):
 			_place_find("fragment", ["forest", "clearing", "stream", "ridge"])
 	elif campaign_chapter == 2:
+		_place_find("event:flare", ["ridge", "forest", "clearing"])
 		_place_find("event:survivor", ["forest", "clearing", "stream", "ridge"])
 	_tile(CAMP)["seen"] = true
 	_tile(CAMP)["visited"] = true
@@ -352,9 +356,21 @@ func present_pending_encounter() -> void:
 			var tune_choice := "Сохранить ритм · страница" if notes > 0 else "Сохранить ритм · −1 сила"
 			var dismantle_choice := "Разобрать корпус · +ветки" if pack_used() < PACK_LIMIT else "Разобрать корпус"
 			encountered.emit("Ветровое реле", relay_text, tune_choice, dismantle_choice, "⌁")
+		"flare":
+			var flare_text := "У старой поисковой вышки лежит сигнальное зеркало. " + ("Тёплый отблеск маяка уже виден сквозь снег; зеркало можно направить на склон, чтобы следопыт нашёл укрытие." if relay_tuned else "В просвете между тучами отражённый свет заметят с перевала. Следопыт сможет найти безопасную тропу к лагерю.") + " Или можно снять линзу и унести её с собой."
+			var take_choice := "Забрать линзу · страница" if notes < 2 and pack_used() < PACK_LIMIT else "Забрать линзу · без находки"
+			encountered.emit("Сигнальное зеркало", flare_text, "Подать сигнал · −1 сила", take_choice, "✧")
 		"survivor":
-			var survivor_text := "Под скалой сидит следопыт в промокшем плаще. " + ("Услышав ровный позывной, он шепчет: «Это сигнал моей сестры. Она осталась у маяка» — и впервые за дни отвечает на имя." if echo_heard and relay_tuned else "Он знает короткий путь к лагерю, но едва держится на ногах.") + " Можно отдать ему еду или оставить координаты и отправиться за помощью одному."
-			encountered.emit("Человек у старого маяка", survivor_text, "Поделиться пайком · спасти его", "Оставить координаты · уйти одному", "⌖")
+			var survivor_text := "Под скалой сидит следопыт в промокшем плаще. "
+			if echo_heard and relay_tuned:
+				survivor_text += "Услышав ровный позывной, он шепчет: «Это сигнал моей сестры. Она осталась у маяка» — и впервые за дни отвечает на имя. "
+			elif flare_lit:
+				survivor_text += "Он узнал свет сигнального зеркала и добрался до укрытия. «Теперь я вижу, куда идти», — говорит он. "
+			else:
+				survivor_text += "Он знает короткий путь к лагерю, но едва держится на ногах. "
+			survivor_text += "Можно помочь ему вернуться вместе или оставить координаты и привести поисковую группу."
+			var rescue_choice := "Вернуться вместе · сигнал помогает" if flare_lit else "Поделиться пайком · спасти его"
+			encountered.emit("Человек у старого маяка", survivor_text, rescue_choice, "Оставить координаты · уйти одному", "⌖")
 
 func resolve_encounter(choice: int) -> void:
 	if pending_encounter == "":
@@ -417,6 +433,23 @@ func resolve_encounter(choice: int) -> void:
 			else:
 				_add_log("Ты разобрал реле, но сумка полна. Ветер унёс позывной.")
 				notice.emit("Реле разобрано, но сумка полна")
+	elif event == "flare":
+		elapsed += 1
+		if choice == 0:
+			flare_lit = true
+			energy = maxi(0, energy - 1)
+			_reveal(3.6)
+			_add_log("Сигнальное зеркало поймало просвет и вспыхнуло над перевалом. Следопыт увидит путь к укрытию.")
+			notice.emit("Сигнал виден с перевала · открыта часть карты")
+		else:
+			if notes < 2 and pack_used() < PACK_LIMIT:
+				notes += 1
+				discoveries += 1
+				_add_log("Ты снял зеркало с вышки. На обороте линзы выцарапаны поисковые координаты.")
+				notice.emit("Координаты с вышки записаны · +1 страница")
+			else:
+				_add_log("Ты снял зеркало, но в сумке не нашлось места для линзы.")
+				notice.emit("Линзу оставил у вышки · сумка полна")
 	elif event == "echo":
 		if choice == 0:
 			echo_heard = true
@@ -434,12 +467,17 @@ func resolve_encounter(choice: int) -> void:
 		_reveal(3.6)
 		if choice == 0:
 			survivor_rescued = true
-			if food > 0:
+			if flare_lit:
+				_add_log("Следопыт узнал свет зеркала и вывел вас к укрытию. Поисковая группа встретила вас у лагеря.")
+				notice.emit("Следопыт спасён · сигнальный путь помог поисковой группе")
+			elif food > 0:
 				food -= 1
+				_add_log("Следопыт принял последний паёк. Вы двинулись к лагерю вместе.")
+				notice.emit("Следопыт спасён · возвращайтесь к лагерю")
 			else:
 				energy = maxi(0, energy - 1)
-			_add_log("Следопыт принял последний паёк. Вы двинулись к лагерю вместе.")
-			notice.emit("Следопыт спасён · возвращайтесь к лагерю")
+				_add_log("Ты поделился последними силами. Следопыт поднялся, и вы пошли к лагерю вместе.")
+				notice.emit("Следопыт спасён · возвращайтесь к лагерю")
 		else:
 			survivor_rescued = false
 			_add_log("Координаты следопыта записаны. Ты отправился за поисковой группой.")
@@ -548,9 +586,9 @@ func _finish(victory: bool, custom_title: String = "", custom_body: String = "",
 		if campaign_chapter >= CHAPTER_COUNT:
 			result_title = "Вместе сквозь туман" if survivor_rescued else "Сигнал найден"
 			if survivor_rescued:
-				result_body = "Следопыт вернулся домой, а маяк снова ведёт путников через перевал. " + ("На старой частоте он ещё раз слышит тот тихий голос: это была его сестра, звавшая его домой." if echo_heard and relay_tuned else "В рации впервые за много недель слышен смех.")
+				result_body = "Следопыт вернулся домой, а маяк снова ведёт путников через перевал. " + ("На старой частоте он ещё раз слышит тот тихий голос: это была его сестра, звавшая его домой." if echo_heard and relay_tuned else ("Сигнальное зеркало помогло ему найти безопасную тропу, а поисковой группе — встретить вас у лагеря." if flare_lit else "В рации впервые за много недель слышен смех."))
 			else:
-				result_body = "Поисковая группа добралась до указанных координат. " + ("Сохранённый позывной помог ей пройти перевал до рассвета." if relay_tuned else "Маяк горит, и теперь никто не потеряется в северном лесу.")
+				result_body = "Поисковая группа добралась до указанных координат. " + ("Сохранённый позывной помог ей пройти перевал до рассвета." if relay_tuned else ("Сигнальное зеркало отметило безопасный путь через перевал." if flare_lit else "Маяк горит, и теперь никто не потеряется в северном лесу."))
 			result_icon = "✦"
 		else:
 			var chapter_titles := ["Сигнал найден", "Три осколка", "Глава завершена"]
@@ -572,7 +610,7 @@ func _add_log(line: String) -> void:
 		journal.pop_back()
 
 func to_dict() -> Dictionary:
-	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "campaign_chapter": campaign_chapter, "fragments": fragments, "survivor_found": survivor_found, "survivor_rescued": survivor_rescued, "echo_heard": echo_heard, "relay_tuned": relay_tuned, "campaign_records": campaign_records, "result_title": result_title, "result_body": result_body, "result_icon": result_icon, "journal": journal}
+	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "campaign_chapter": campaign_chapter, "fragments": fragments, "survivor_found": survivor_found, "survivor_rescued": survivor_rescued, "echo_heard": echo_heard, "relay_tuned": relay_tuned, "flare_lit": flare_lit, "campaign_records": campaign_records, "result_title": result_title, "result_body": result_body, "result_icon": result_icon, "journal": journal}
 
 func from_dict(data: Dictionary) -> void:
 	if not data.has("grid") or not data.has("position"):
@@ -603,6 +641,7 @@ func from_dict(data: Dictionary) -> void:
 	survivor_rescued = bool(data.get("survivor_rescued", false))
 	echo_heard = bool(data.get("echo_heard", false))
 	relay_tuned = bool(data.get("relay_tuned", false))
+	flare_lit = bool(data.get("flare_lit", false))
 	campaign_records.clear()
 	for record in data.get("campaign_records", []):
 		campaign_records.append(str(record))

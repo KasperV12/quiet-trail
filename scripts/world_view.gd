@@ -257,6 +257,7 @@ func _draw_find(pos: Vector2, s: float, kind: String) -> void:
 		"event:radio": color = Color("#a8d1c4")
 		"event:cabin": color = Color("#d9ae79")
 		"event:survivor": color = Color("#e5c18f")
+		"event:flare": color = Color("#e9d5a1")
 	draw_circle(pos, s * .16, Color(color, .11))
 	draw_circle(pos, s * (.072 + sin(pulse * 2.6) * .006), color)
 	draw_circle(pos, s * .028, Color("#fff2c7"))
@@ -267,6 +268,11 @@ func _draw_find(pos: Vector2, s: float, kind: String) -> void:
 	elif kind == "event:survivor":
 		draw_circle(pos, s * .055, Color("#36443a"))
 		draw_line(pos + Vector2(0, s * .03), pos + Vector2(0, s * .10), Color("#36443a"), 1.4, true)
+	elif kind == "event:flare":
+		draw_line(pos + Vector2(-s * .10, 0), pos + Vector2(s * .10, 0), Color("#fff3cc"), 1.2, true)
+		draw_line(pos + Vector2(0, -s * .10), pos + Vector2(0, s * .10), Color("#fff3cc"), 1.2, true)
+		draw_line(pos + Vector2(-s * .07, -s * .07), pos + Vector2(s * .07, s * .07), Color("#fff3cc"), 1.0, true)
+		draw_line(pos + Vector2(s * .07, -s * .07), pos + Vector2(-s * .07, s * .07), Color("#fff3cc"), 1.0, true)
 
 func _draw_trail() -> void:
 	var points := PackedVector2Array()
