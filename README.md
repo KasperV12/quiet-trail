@@ -37,6 +37,7 @@
 - `scenes/main.tscn` — стартовая сцена.
 - `scripts/main.gd` — интерфейс, меню, сохранения и ввод.
 - `scripts/expedition_state.gd` — состояние игры, карта, предметы и игровой цикл.
+- `scripts/title_art.gd` — оригинальная иллюстрация маяка в главном меню.
 - `scripts/world_view.gd` — карта, отрисовка и управление кликами.
 - `assets/kenney_rpg/` — открытый набор тайлов Kenney RPG pack (CC0).
 - `CREDITS.md` — происхождение графики и лицензии.

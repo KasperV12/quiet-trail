@@ -2,6 +2,7 @@ extends Control
 
 const ExpeditionStateScript = preload("res://scripts/expedition_state.gd")
 const ExpeditionMapScript = preload("res://scripts/world_view.gd")
+const TitleArtScript = preload("res://scripts/title_art.gd")
 const SAVE_PATH := "user://lantern_trail_save.json"
 const SETTINGS_PATH := "user://lantern_trail_settings.json"
 
@@ -388,6 +389,10 @@ func _show_dialog(kicker: String, title: String, body_text: String, primary_text
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 12)
 	panel.add_child(col)
+	if kicker == "ТИХАЯ ТРОПА":
+		var title_art = TitleArtScript.new()
+		title_art.custom_minimum_size = Vector2(450, 150)
+		col.add_child(title_art)
 	var sigil := _label(icon, 31, Color("#e8c17f"), true)
 	sigil.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(sigil)
