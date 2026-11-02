@@ -12,6 +12,7 @@ const CAMP := Vector2i(1, 6)
 const OBSERVATORY := Vector2i(8, 1)
 const MAX_ENERGY := 9
 const PACK_LIMIT := 6
+const CHAPTER_COUNT := 3
 
 var grid: Array[Dictionary] = []
 var position := CAMP
@@ -26,6 +27,14 @@ var ended := false
 var won := false
 var campfires: Array[Vector2i] = []
 var pending_encounter := ""
+var campaign_chapter := 0
+var fragments := 0
+var survivor_found := false
+var survivor_rescued := false
+var campaign_records: Array[String] = []
+var result_title := ""
+var result_body := ""
+var result_icon := "✦"
 var journal: Array[String] = []
 var rng := RandomNumberGenerator.new()
 
@@ -33,6 +42,17 @@ func _init() -> void:
 	reset()
 
 func reset() -> void:
+	campaign_chapter = 0
+	campaign_records.clear()
+	_reset_expedition()
+
+func retry_expedition() -> void:
+	_reset_expedition()
+
+func next_expedition() -> void:
+	_reset_expedition()
+
+func _reset_expedition() -> void:
 	rng.randomize()
 	position = CAMP
 	energy = MAX_ENERGY
@@ -44,6 +64,12 @@ func reset() -> void:
 	discoveries = 0
 	ended = false
 	won = false
+	result_title = ""
+	result_body = ""
+	result_icon = "✦"
+	fragments = 0
+	survivor_found = false
+	survivor_rescued = false
 	campfires.clear()
 	pending_encounter = ""
 	journal.clear()
@@ -62,7 +88,7 @@ func reset() -> void:
 				kind = "bog"
 			grid.append({"kind": kind, "seen": false, "visited": false, "found": ""})
 	_set_tile(CAMP, "camp", "")
-	_set_tile(OBSERVATORY, "ruin", "module")
+	_set_tile(OBSERVATORY, "ruin", "module" if campaign_chapter == 0 else "")
 	_place_find("wood", ["forest", "clearing"])
 	_place_find("wood", ["forest", "clearing"])
 	_place_find("food", ["forest", "clearing", "stream"])
@@ -71,10 +97,24 @@ func reset() -> void:
 	_place_find("notes", ["ridge", "ruin"])
 	_place_find("event:radio", ["forest", "clearing", "stream"])
 	_place_find("event:cabin", ["forest", "ridge", "clearing"])
+	if campaign_chapter == 1:
+		for i in range(3):
+			_place_find("fragment", ["forest", "clearing", "stream", "ridge"])
+	elif campaign_chapter == 2:
+		_place_find("event:survivor", ["forest", "clearing", "stream", "ridge"])
 	_tile(CAMP)["seen"] = true
 	_tile(CAMP)["visited"] = true
 	_reveal()
-	_add_log("Лагерь позади. Лес медленно просыпается.")
+	var chapter_opening := [
+		"Утром в лес пришёл сигнал с маяка. Найди пропавший модуль и вернись в лагерь.",
+		"Маяк снова горит, но его ритм не совпадает с записями команды. Собери три фрагмента сигнала.",
+		"По рации отвечает пропавший следопыт. Его голос доносится с северного склона. Найди его и возвращайся вместе."
+	]
+	_add_log(chapter_opening[mini(campaign_chapter, chapter_opening.size() - 1)])
+	for record: String in campaign_records:
+		journal.append("Память: " + record)
+	while journal.size() > 6:
+		journal.pop_back()
 	changed.emit()
 
 func _index(cell: Vector2i) -> int:
@@ -110,6 +150,23 @@ func _reveal(radius: float = 2.45) -> void:
 
 func pack_used() -> int:
 	return wood + food + notes + (2 if has_module else 0)
+
+func objective_text() -> String:
+	match campaign_chapter:
+		0:
+			return "Найти сигнальный модуль" if not has_module else "Вернуться в лагерь с модулем"
+		1:
+			return "Собрать фрагменты сигнала · %d/3" % fragments if fragments < 3 else "Вернуться в лагерь с записями"
+		_:
+			if not survivor_found:
+				return "Найти пропавшего следопыта"
+			return "Вернуться в лагерь с человеком" if survivor_rescued else "Вернуться в лагерь за помощью"
+
+func _objective_complete() -> bool:
+	match campaign_chapter:
+		0: return has_module
+		1: return fragments >= 3
+		_: return survivor_found
 
 func day_number() -> int:
 	return 1 + int(elapsed / 13)
@@ -155,7 +212,7 @@ func move(delta: Vector2i) -> void:
 		energy = maxi(0, energy - 1)
 		_add_log("Мшистая низина затянула сапог. Потеряна выносливость.")
 	_collect()
-	if has_module and position == CAMP:
+	if position == CAMP and _objective_complete():
 		_finish(true)
 		return
 	if energy <= 0:
@@ -179,6 +236,12 @@ func _collect() -> void:
 		discoveries += 1
 		_add_log("В обсерватории найден сигнальный модуль. Он всё ещё тёплый.")
 		notice.emit("Сигнальный модуль найден. Теперь — к лагерю.")
+	elif item == "fragment" and fragments < 3 and pack_used() < PACK_LIMIT:
+		fragments += 1
+		discoveries += 1
+		_tile(position)["found"] = ""
+		_add_log("В мху найден осколок сигнального кристалла.")
+		notice.emit("Фрагмент сигнала · %d / 3" % fragments)
 	elif item == "wood" and pack_used() < PACK_LIMIT:
 		wood += 1
 		discoveries += 1
@@ -203,6 +266,8 @@ func present_pending_encounter() -> void:
 		encountered.emit("Голос из старого радио", "Среди помех проступает спокойный голос: «Если слышишь это, северный склон ещё проходим. Ищи огни у воды». Можно задержаться и разобрать координаты или не рисковать зарядом фонаря.", "Настроить частоту · −1 сила", "Идти дальше", "⌁")
 	elif pending_encounter == "cabin":
 		encountered.emit("Лесной кордон", "Под еловыми лапами прячется старая сторожка. Внутри сухо, но крыша тихо оседает под тяжестью снега. Можно осмотреть ящик с припасами или передохнуть под навесом.", "Обыскать ящик · −1 сила", "Передохнуть · +2 силы", "⌂")
+	elif pending_encounter == "survivor":
+		encountered.emit("Человек у старого маяка", "Под скалой сидит следопыт в промокшем плаще. Он знает короткий путь к лагерю, но едва держится на ногах. Можно отдать ему еду или оставить координаты и отправиться за помощью одному.", "Поделиться пайком · спасти его", "Оставить координаты · уйти одному", "⌖")
 
 func resolve_encounter(choice: int) -> void:
 	if pending_encounter == "":
@@ -222,7 +287,7 @@ func resolve_encounter(choice: int) -> void:
 		else:
 			_add_log("Радио стихло, оставив только шорох помех.")
 			notice.emit("Ты оставил радио в покое")
-	else:
+	elif event == "cabin":
 		if choice == 0:
 			energy = maxi(0, energy - 1)
 			elapsed += 1
@@ -243,6 +308,22 @@ func resolve_encounter(choice: int) -> void:
 			elapsed += 1
 			_add_log("Крыша сторожки укрыла от ветра. Восстановлено 2 ед. сил.")
 			notice.emit("Передышка под навесом · +2 силы")
+	else:
+		survivor_found = true
+		elapsed += 1
+		_reveal(3.6)
+		if choice == 0:
+			survivor_rescued = true
+			if food > 0:
+				food -= 1
+			else:
+				energy = maxi(0, energy - 1)
+			_add_log("Следопыт принял последний паёк. Вы двинулись к лагерю вместе.")
+			notice.emit("Следопыт спасён · возвращайтесь к лагерю")
+		else:
+			survivor_rescued = false
+			_add_log("Координаты следопыта записаны. Ты отправился за поисковой группой.")
+			notice.emit("Координаты переданы лагерю · возвращайся за помощью")
 	if energy <= 0 and position != CAMP:
 		_finish(false, "Тишина в эфире", "Последних сил не хватило на обратный путь. Утром в лес отправится поисковая группа.", "…")
 	else:
@@ -331,9 +412,25 @@ func _finish(victory: bool, custom_title: String = "", custom_body: String = "",
 	ended = true
 	won = victory
 	if victory:
-		_add_log("Маяк снова загорелся над северным лесом.")
-		finished.emit(true, "Маяк снова горит", "Ты вернулся с сигнальным модулем. Вечерний свет снова находит путь сквозь туман.", "✦")
+		var completed := campaign_chapter
+		var summaries := ["Ты принёс сигнальный модуль. Маяк зажёгся над северным лесом.", "Три фрагмента собраны. В повторяющемся сигнале слышно имя пропавшего следопыта.", "Следопыт спасён и вернулся в лагерь." if survivor_rescued else "Ты вернулся за поисковой группой; координаты следопыта теперь у спасателей."]
+		campaign_records.push_front(summaries[mini(completed, summaries.size() - 1)])
+		campaign_chapter = mini(campaign_chapter + 1, CHAPTER_COUNT)
+		if campaign_chapter >= CHAPTER_COUNT:
+			result_title = "Вместе сквозь туман" if survivor_rescued else "Сигнал найден"
+			result_body = "Следопыт вернулся домой, а маяк снова ведёт путников через перевал. В рации впервые за много недель слышен смех." if survivor_rescued else "Поисковая группа добралась до указанных координат. Маяк горит, и теперь никто не потеряется в северном лесу."
+			result_icon = "✦"
+		else:
+			var chapter_titles := ["Сигнал найден", "Три осколка", "Глава завершена"]
+			var chapter_bodies := ["Маяк снова горит. Но из темноты приходит новый сигнал.", "Фрагменты складываются в координаты на северном склоне. Кто-то всё ещё там.", "Ты вернулся в лагерь с новостями. История продолжается."]
+			result_title = chapter_titles[completed]
+			result_body = chapter_bodies[completed]
+			result_icon = "✦"
+		finished.emit(true, result_title, result_body, result_icon)
 	else:
+		result_title = custom_title
+		result_body = custom_body
+		result_icon = custom_icon
 		finished.emit(false, custom_title, custom_body, custom_icon)
 	changed.emit()
 
@@ -343,7 +440,7 @@ func _add_log(line: String) -> void:
 		journal.pop_back()
 
 func to_dict() -> Dictionary:
-	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "journal": journal}
+	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "campaign_chapter": campaign_chapter, "fragments": fragments, "survivor_found": survivor_found, "survivor_rescued": survivor_rescued, "campaign_records": campaign_records, "result_title": result_title, "result_body": result_body, "result_icon": result_icon, "journal": journal}
 
 func from_dict(data: Dictionary) -> void:
 	if not data.has("grid") or not data.has("position"):
@@ -368,6 +465,16 @@ func from_dict(data: Dictionary) -> void:
 		if cell.size() >= 2:
 			campfires.append(Vector2i(int(cell[0]), int(cell[1])))
 	pending_encounter = str(data.get("pending_encounter", ""))
+	campaign_chapter = clampi(int(data.get("campaign_chapter", 0)), 0, CHAPTER_COUNT)
+	fragments = int(data.get("fragments", 0))
+	survivor_found = bool(data.get("survivor_found", false))
+	survivor_rescued = bool(data.get("survivor_rescued", false))
+	campaign_records.clear()
+	for record in data.get("campaign_records", []):
+		campaign_records.append(str(record))
+	result_title = str(data.get("result_title", ""))
+	result_body = str(data.get("result_body", ""))
+	result_icon = str(data.get("result_icon", "✦"))
 	journal.clear()
 	for line in data.get("journal", []):
 		journal.append(str(line))

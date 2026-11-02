@@ -12,6 +12,8 @@ var notice_label: Label
 var time_label: Label
 var weather_label: Label
 var region_label: Label
+var chapter_label: Label
+var chapter_hint_label: Label
 var objective_label: Label
 var energy_value: Label
 var energy_bar: ProgressBar
@@ -19,6 +21,8 @@ var pack_value: Label
 var pack_bar: ProgressBar
 var resource_values: Dictionary = {}
 var discoveries_label: Label
+var fragment_value: Label
+var survivor_value: Label
 var journal_label: Label
 var rest_button: Button
 var return_button: Button
@@ -110,9 +114,11 @@ func _build_hero(parent: VBoxContainer) -> void:
 	title_col.add_theme_constant_override("separation", 3)
 	title_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(title_col)
-	title_col.add_child(_label("СЕВЕРНЫЙ ЗАПОВЕДНИК   ·   СЕКТОР 04", 10, Color("#dfb777"), true))
+	chapter_label = _label("ГЛАВА I  ·  СИГНАЛ", 10, Color("#dfb777"), true)
+	title_col.add_child(chapter_label)
 	title_col.add_child(_label("Где молчит маяк", 27, Color("#edf0e8"), true))
-	title_col.add_child(_label("Найди сигнальный модуль и вернись к лагерю до темноты.", 12, Color("#a7b2a5")))
+	chapter_hint_label = _label("", 12, Color("#a7b2a5"))
+	title_col.add_child(chapter_hint_label)
 	var goal := _panel()
 	goal.custom_minimum_size = Vector2(250, 0)
 	row.add_child(goal)
@@ -227,6 +233,8 @@ func _build_inventory_card(parent: VBoxContainer) -> void:
 	resource_values["food"] = _inventory_row(col, "❋", "Лесные грибы")
 	resource_values["notes"] = _inventory_row(col, "▤", "Страницы журнала")
 	resource_values["module"] = _inventory_row(col, "✦", "Сигнальный модуль")
+	fragment_value = _inventory_row(col, "◈", "Осколки сигнала")
+	survivor_value = _inventory_row(col, "⌖", "Следопыт")
 
 func _inventory_row(parent: VBoxContainer, icon: String, label_text: String) -> Label:
 	var row := HBoxContainer.new()
@@ -294,7 +302,7 @@ func _build_footer(parent: VBoxContainer) -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
-	row.add_child(_label("ПРОТОТИП 0.2  ·  БЕРЕГИ СИЛЫ И СВЕТ", 8, Color("#718074")))
+	row.add_child(_label("КАМПАНИЯ · ТРИ ВЫЛАЗКИ", 8, Color("#718074")))
 
 func _build_overlay() -> void:
 	overlay = ColorRect.new()
@@ -322,9 +330,18 @@ func _show_pause() -> void:
 
 func _show_finished(won: bool, title: String, body: String, icon: String) -> void:
 	_save_game()
-	_show_dialog("ЭКСПЕДИЦИЯ ЗАВЕРШЕНА", title, body, "В ГЛАВНОЕ МЕНЮ", func(): _show_title_screen(), "НОВАЯ ВЫЛАЗКА", func():
-		state.reset()
-		_start_game(), true, icon)
+	if won and state.campaign_chapter >= state.CHAPTER_COUNT:
+		_show_dialog("ИСТОРИЯ ЗАВЕРШЕНА", title, body, "НОВАЯ ИСТОРИЯ", func():
+			state.reset()
+			_start_game(), "В ГЛАВНОЕ МЕНЮ", func(): _show_title_screen(), true, icon)
+	elif won:
+		_show_dialog("ГЛАВА %d / %d" % [state.campaign_chapter, state.CHAPTER_COUNT], title, body, "ПРОДОЛЖИТЬ ИСТОРИЮ", func():
+			state.next_expedition()
+			_start_game(), "В ГЛАВНОЕ МЕНЮ", func(): _show_title_screen(), true, icon)
+	else:
+		_show_dialog("ВЫЛАЗКА ПРЕРВАНА", title, body, "ПОВТОРИТЬ ГЛАВУ", func():
+			state.retry_expedition()
+			_start_game(), "В ГЛАВНОЕ МЕНЮ", func(): _show_title_screen(), true, icon)
 
 func _on_encountered(title: String, body: String, first_choice: String, second_choice: String, icon: String) -> void:
 	_show_dialog("СЛУЧАЙ В ЛЕСУ", title, body, first_choice, func():
@@ -379,8 +396,11 @@ func _show_dialog(kicker: String, title: String, body_text: String, primary_text
 func _start_game() -> void:
 	overlay.visible = false
 	_update_ui()
-	_save_game()
 	map_view.grab_focus()
+	if state.ended:
+		_show_finished(state.won, state.result_title, state.result_body, state.result_icon)
+		return
+	_save_game()
 	if state.pending_encounter != "":
 		state.present_pending_encounter()
 
@@ -427,7 +447,11 @@ func _update_ui() -> void:
 	time_label.text = "День %d  ·  %s" % [state.day_number(), state.clock_text()]
 	weather_label.text = "☁  " + state.weather_text()
 	region_label.text = state.current_region()
-	objective_label.text = "Вернуться в лагерь с модулем" if state.has_module else "Найти модуль в старой обсерватории"
+	var chapter_names := ["СИГНАЛ", "ОСКОЛКИ", "СЛЕДОПЫТ"]
+	chapter_hint_label.text = ["Найди модуль в старой обсерватории и вернись в лагерь.", "Собери три осколка сигнала и вернись с записями.", "Найди пропавшего следопыта и доберись с ним до лагеря."][mini(state.campaign_chapter, 2)]
+	if state.campaign_chapter < state.CHAPTER_COUNT:
+		chapter_label.text = "ГЛАВА %s  ·  %s" % [["I", "II", "III"][state.campaign_chapter], chapter_names[state.campaign_chapter]]
+	objective_label.text = state.objective_text()
 	energy_value.text = "%d / %d" % [state.energy, state.MAX_ENERGY]
 	energy_bar.value = float(state.energy) / state.MAX_ENERGY * 100.0
 	pack_value.text = "%d / %d" % [state.pack_used(), state.PACK_LIMIT]
@@ -436,6 +460,8 @@ func _update_ui() -> void:
 	resource_values["food"].text = str(state.food)
 	resource_values["notes"].text = str(state.notes)
 	resource_values["module"].text = "НАЙДЕН" if state.has_module else "—"
+	fragment_value.text = "%d / 3" % state.fragments
+	survivor_value.text = "СПАСЁН" if state.survivor_rescued else ("НАЙДЕН" if state.survivor_found else "—")
 	discoveries_label.text = "%d находок" % state.discoveries
 	var journal_lines := PackedStringArray()
 	for line: String in state.journal:

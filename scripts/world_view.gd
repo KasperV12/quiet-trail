@@ -221,8 +221,10 @@ func _draw_find(pos: Vector2, s: float, kind: String) -> void:
 		"food": color = Color("#d3d392")
 		"notes": color = Color("#c5bd91")
 		"module": color = Color("#ffd984")
+		"fragment": color = Color("#b8b3de")
 		"event:radio": color = Color("#a8d1c4")
 		"event:cabin": color = Color("#d9ae79")
+		"event:survivor": color = Color("#e5c18f")
 	draw_circle(pos, s * .16, Color(color, .11))
 	draw_circle(pos, s * (.072 + sin(pulse * 2.6) * .006), color)
 	draw_circle(pos, s * .028, Color("#fff2c7"))
@@ -230,6 +232,9 @@ func _draw_find(pos: Vector2, s: float, kind: String) -> void:
 		draw_arc(pos, s * .12, PI * 1.1, PI * 1.9, 14, Color("#d7eee0"), 1.2, true)
 	elif kind == "event:cabin":
 		draw_colored_polygon(PackedVector2Array([pos + Vector2(-s * .065, s * .015), pos + Vector2(0, -s * .075), pos + Vector2(s * .065, s * .015)]), Color("#5b4632"))
+	elif kind == "event:survivor":
+		draw_circle(pos, s * .055, Color("#36443a"))
+		draw_line(pos + Vector2(0, s * .03), pos + Vector2(0, s * .10), Color("#36443a"), 1.4, true)
 
 func _draw_trail() -> void:
 	var points := PackedVector2Array()
