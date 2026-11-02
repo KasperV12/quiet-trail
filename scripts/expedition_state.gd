@@ -161,11 +161,57 @@ func _place_find(found: String, allowed_kinds: Array) -> void:
 		_tile(candidates[rng.randi_range(0, candidates.size() - 1)])["found"] = found
 
 func _reveal(radius: float = 2.45) -> void:
+	var visibility := _weather_vision_radius()
+	var adjusted_radius := minf(radius, visibility) if radius <= 2.45 else minf(radius, visibility + 1.15)
 	for y in range(MAP_H):
 		for x in range(MAP_W):
 			var cell := Vector2i(x, y)
-			if position.distance_to(cell) <= radius:
+			if position.distance_to(cell) <= adjusted_radius:
 				_tile(cell)["seen"] = true
+
+func _weather_stage() -> int:
+	if campaign_chapter == 1 or campaign_chapter >= 2:
+		return 2 if elapsed > 8 else (1 if elapsed > 4 else 0)
+	return 1 if elapsed > 11 else 0
+
+func _weather_vision_radius() -> float:
+	if campaign_chapter >= 2:
+		return 1.2 if _weather_stage() >= 2 else (1.8 if _weather_stage() == 1 else 2.45)
+	if campaign_chapter == 1:
+		return 1.55 if _weather_stage() >= 2 else (2.0 if _weather_stage() == 1 else 2.45)
+	return 1.8 if _weather_stage() > 0 else 2.45
+
+func _move_hazard_chance(terrain: String) -> float:
+	var chance := 0.0
+	if terrain == "bog":
+		chance = 0.28 if campaign_chapter == 0 else 0.38
+	elif terrain == "ridge" and campaign_chapter >= 1:
+		chance = 0.20 if campaign_chapter == 1 else 0.30
+	var stage := _weather_stage()
+	if campaign_chapter == 0 and stage > 0 and terrain in ["bog", "ridge"]:
+		chance += 0.12
+	elif campaign_chapter == 1 and stage >= 2:
+		if terrain == "ridge":
+			chance += 0.18
+		elif terrain == "clearing":
+			chance += 0.08
+	elif campaign_chapter >= 2 and stage > 0 and terrain in ["ridge", "clearing", "stream", "bog"]:
+		chance += 0.12 if stage == 1 else 0.22
+	return clampf(chance, 0.0, 0.62)
+
+func _rest_recovery() -> int:
+	var terrain: String = _tile(position)["kind"]
+	var sheltered := terrain in ["camp", "forest"] or position in campfires
+	if sheltered:
+		return 3
+	var stage := _weather_stage()
+	if campaign_chapter == 1 and stage >= 2 and terrain in ["ridge", "clearing"]:
+		return 1
+	if campaign_chapter >= 2 and stage > 0 and terrain in ["ridge", "clearing", "stream", "bog"]:
+		return 2 if stage == 1 else 1
+	if campaign_chapter == 0 and stage > 0 and terrain in ["ridge", "bog"]:
+		return 2
+	return 3
 
 func pack_used() -> int:
 	return wood + food + notes + (2 if has_module else 0)
@@ -236,14 +282,10 @@ func move(delta: Vector2i) -> void:
 	_tile(position)["visited"] = true
 	_reveal()
 	var terrain: String = _tile(position)["kind"]
-	var hazard_chance := 0.0
-	if terrain == "bog":
-		hazard_chance = 0.28 if campaign_chapter == 0 else 0.38
-	elif terrain == "ridge" and campaign_chapter >= 1:
-		hazard_chance = 0.20 if campaign_chapter == 1 else 0.30
+	var hazard_chance := _move_hazard_chance(terrain)
 	if rng.randf() < hazard_chance:
 		energy = maxi(0, energy - 1)
-		var hazard_lines := {"bog": "Мшистая низина затянула сапог. Потеряна выносливость.", "ridge": "Порыв ветра сбил дыхание на открытом гребне. Потеряна выносливость."}
+		var hazard_lines := {"bog": "Мшистая низина затянула сапог. Потеряна выносливость.", "ridge": "Порыв ветра сбил дыхание на открытом гребне. Потеряна выносливость.", "clearing": "Снежный порыв сбил тебя с тропы. Потеряна выносливость.", "stream": "Ледяной ветер ударил у воды. Потеряна выносливость."}
 		_add_log(hazard_lines.get(terrain, "Путь отнял силы."))
 	_collect()
 	if position == CAMP and _objective_complete():
@@ -449,10 +491,15 @@ func rest() -> void:
 	if energy >= MAX_ENERGY:
 		notice.emit("Ты уже полон сил.")
 		return
-	energy = mini(MAX_ENERGY, energy + 3)
+	var recovery := _rest_recovery()
+	energy = mini(MAX_ENERGY, energy + recovery)
 	elapsed += 1
-	_add_log("Передышка у старого дерева. Восстановлено 3 ед. сил.")
-	notice.emit("Выносливость восстановлена")
+	if recovery < 3:
+		_add_log("Непогода не дала согреться. Восстановлено %d ед. сил; найди лес или костёр." % recovery)
+		notice.emit("Холодная передышка · +%d силы. Лес и костёр укроют от ветра." % recovery)
+	else:
+		_add_log("Передышка в укрытии. Восстановлено 3 ед. сил.")
+		notice.emit("Выносливость восстановлена · +3")
 	changed.emit()
 
 func return_to_camp() -> void:
