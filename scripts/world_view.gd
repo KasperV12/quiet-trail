@@ -258,6 +258,8 @@ func _draw_find(pos: Vector2, s: float, kind: String) -> void:
 		"event:cabin": color = Color("#d9ae79")
 		"event:survivor": color = Color("#e5c18f")
 		"event:flare": color = Color("#e9d5a1")
+	if kind.begins_with("page:"):
+		color = Color("#c5bd91")
 	draw_circle(pos, s * .16, Color(color, .11))
 	draw_circle(pos, s * (.072 + sin(pulse * 2.6) * .006), color)
 	draw_circle(pos, s * .028, Color("#fff2c7"))

@@ -92,8 +92,8 @@ func _reset_expedition() -> void:
 	_place_find("wood", ["forest", "clearing"])
 	_place_find("food", ["forest", "clearing", "stream"])
 	_place_find("food", ["forest", "clearing", "stream"])
-	_place_find("notes", ["ridge", "ruin"])
-	_place_find("notes", ["ridge", "ruin"])
+	_place_find("page:%d:1" % campaign_chapter, ["ridge", "ruin"])
+	_place_find("page:%d:2" % campaign_chapter, ["ridge", "ruin"])
 	_place_find("event:radio", ["forest", "clearing", "stream"])
 	_place_find("event:cabin", ["forest", "ridge", "clearing"])
 	if campaign_chapter == 0:
@@ -336,12 +336,20 @@ func _collect() -> void:
 		_tile(position)["found"] = ""
 		_add_log("Найден съедобный лесной гриб.")
 		notice.emit("Лесные грибы · +1")
-	elif item == "notes" and notes < 2 and pack_used() < PACK_LIMIT:
+	elif (item == "notes" or item.begins_with("page:")) and notes < 2 and pack_used() < PACK_LIMIT:
 		notes += 1
 		discoveries += 1
 		_tile(position)["found"] = ""
-		_add_log("В камнях обнаружена страница старого журнала.")
-		notice.emit("Страница журнала найдена")
+		var excerpt := "В камнях обнаружена страница старого журнала."
+		match item:
+			"page:0:1": excerpt = "Из журнала у обсерватории: «Маяк ответил трижды. Ветер дул с юга, а голос шёл с севера»"
+			"page:0:2": excerpt = "На полях старой карты: «Не гаси огонь. На той стороне перевала его примут за наш ответ»"
+			"page:1:1": excerpt = "Запись полевой группы: «Кристалл не разбит — он повторяет голос. Три вспышки складываются в координаты»"
+			"page:1:2": excerpt = "Почерк торопливый: «Оставить реле на старой частоте. Если она услышит позывной, значит, добралась до станции»"
+			"page:2:1": excerpt = "На карте поисков: «Сигнальное зеркало видно с уступа только в просвет. Крепление выше тропы»"
+			"page:2:2": excerpt = "Последняя запись: «Если найдёте следопыта — не спрашивайте, почему он ушёл. Просто скажите: маяк ещё горит»"
+		_add_log(excerpt)
+		notice.emit("Страница журнала найдена · +1 заметка")
 
 func present_pending_encounter() -> void:
 	match pending_encounter:
