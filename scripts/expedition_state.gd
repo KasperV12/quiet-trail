@@ -31,6 +31,8 @@ var campaign_chapter := 0
 var fragments := 0
 var survivor_found := false
 var survivor_rescued := false
+var echo_heard := false
+var relay_tuned := false
 var campaign_records: Array[String] = []
 var result_title := ""
 var result_body := ""
@@ -44,6 +46,8 @@ func _init() -> void:
 func reset() -> void:
 	campaign_chapter = 0
 	campaign_records.clear()
+	echo_heard = false
+	relay_tuned = false
 	_reset_expedition()
 
 func retry_expedition() -> void:
@@ -89,7 +93,10 @@ func _reset_expedition() -> void:
 	_place_find("notes", ["ridge", "ruin"])
 	_place_find("event:radio", ["forest", "clearing", "stream"])
 	_place_find("event:cabin", ["forest", "ridge", "clearing"])
-	if campaign_chapter == 1:
+	if campaign_chapter == 0:
+		_place_find("event:echo", ["forest", "clearing", "stream"])
+	elif campaign_chapter == 1:
+		_place_find("event:relay", ["ridge", "forest", "clearing"])
 		for i in range(3):
 			_place_find("fragment", ["forest", "clearing", "stream", "ridge"])
 	elif campaign_chapter == 2:
@@ -99,8 +106,8 @@ func _reset_expedition() -> void:
 	_reveal()
 	var chapter_opening := [
 		"Утром в лес пришёл сигнал с маяка. Найди пропавший модуль и вернись в лагерь.",
-		"Маяк снова горит, но его ритм не совпадает с записями команды. Собери три фрагмента сигнала.",
-		"По рации отвечает пропавший следопыт. Его голос доносится с северного склона. Найди его и возвращайся вместе."
+		"Маяк снова горит, но его ритм не совпадает с записями команды. " + ("В эфире уже звучал чей-то голос; теперь ответь на него. " if echo_heard else "В помехах чудится чей-то голос. ") + "Собери три фрагмента сигнала.",
+		("Сохранённый ритм маяка ведёт на северный склон. " if relay_tuned else "Маяк молчит; остаются записанные координаты. ") + "По рации отвечает пропавший следопыт. Найди его и возвращайся вместе."
 	]
 	_add_log(chapter_opening[mini(campaign_chapter, chapter_opening.size() - 1)])
 	for record: String in campaign_records:
@@ -291,12 +298,21 @@ func _collect() -> void:
 		notice.emit("Страница журнала найдена")
 
 func present_pending_encounter() -> void:
-	if pending_encounter == "radio":
-		encountered.emit("Голос из старого радио", "Среди помех проступает спокойный голос: «Если слышишь это, северный склон ещё проходим. Ищи огни у воды». Можно задержаться и разобрать координаты или не рисковать зарядом фонаря.", "Настроить частоту · −1 сила", "Идти дальше", "⌁")
-	elif pending_encounter == "cabin":
-		encountered.emit("Лесной кордон", "Под еловыми лапами прячется старая сторожка. Внутри сухо, но крыша тихо оседает под тяжестью снега. Можно осмотреть ящик с припасами или передохнуть под навесом.", "Обыскать ящик · −1 сила", "Передохнуть · +2 силы", "⌂")
-	elif pending_encounter == "survivor":
-		encountered.emit("Человек у старого маяка", "Под скалой сидит следопыт в промокшем плаще. Он знает короткий путь к лагерю, но едва держится на ногах. Можно отдать ему еду или оставить координаты и отправиться за помощью одному.", "Поделиться пайком · спасти его", "Оставить координаты · уйти одному", "⌖")
+	match pending_encounter:
+		"radio":
+			encountered.emit("Голос из старого радио", "Среди помех проступает спокойный голос: «Если слышишь это, северный склон ещё проходим. Ищи огни у воды». Можно задержаться и разобрать координаты или не рисковать зарядом фонаря.", "Настроить частоту · −1 сила", "Идти дальше", "⌁")
+		"cabin":
+			encountered.emit("Лесной кордон", "Под еловыми лапами прячется старая сторожка. Внутри сухо, но крыша тихо оседает под тяжестью снега. Можно осмотреть ящик с припасами или передохнуть под навесом.", "Обыскать ящик · −1 сила", "Передохнуть · +2 силы", "⌂")
+		"echo":
+			encountered.emit("Эхо под кронами", "На старом полевом телефоне вдруг щёлкает линия. Женский голос произносит: «Не гаси огонь. Мы увидим его с перевала». Потом шёпот повторяет позывной маяка. Можно записать его или оставить слова лесу.", "Записать позывной · −1 сила", "Не задерживаться", "⌁")
+		"relay":
+			var relay_text := "На гребне стоит ветровое реле маяка. " + ("Позывной с того старого телефона совпадает с ритмом его искр." if echo_heard else "Внутри корпуса застрял тонкий осколок сигнального стекла.") + " Его можно настроить для поисковой группы или разобрать на детали."
+			var tune_choice := "Сохранить ритм · страница" if notes > 0 else "Сохранить ритм · −1 сила"
+			var dismantle_choice := "Разобрать корпус · +ветки" if pack_used() < PACK_LIMIT else "Разобрать корпус"
+			encountered.emit("Ветровое реле", relay_text, tune_choice, dismantle_choice, "⌁")
+		"survivor":
+			var survivor_text := "Под скалой сидит следопыт в промокшем плаще. " + ("Услышав ровный позывной, он шепчет: «Это сигнал моей сестры. Она осталась у маяка» — и впервые за дни отвечает на имя." if echo_heard and relay_tuned else "Он знает короткий путь к лагерю, но едва держится на ногах.") + " Можно отдать ему еду или оставить координаты и отправиться за помощью одному."
+			encountered.emit("Человек у старого маяка", survivor_text, "Поделиться пайком · спасти его", "Оставить координаты · уйти одному", "⌖")
 
 func resolve_encounter(choice: int) -> void:
 	if pending_encounter == "":
@@ -337,6 +353,39 @@ func resolve_encounter(choice: int) -> void:
 			elapsed += 1
 			_add_log("Крыша сторожки укрыла от ветра. Восстановлено 2 ед. сил.")
 			notice.emit("Передышка под навесом · +2 силы")
+	elif event == "relay":
+		elapsed += 1
+		if choice == 0:
+			relay_tuned = true
+			if notes > 0:
+				notes -= 1
+			else:
+				energy = maxi(0, energy - 1)
+			_reveal(3.6)
+			_add_log("Ветровое реле настроено на ровный позывной. Его ритм можно будет узнать издалека.")
+			notice.emit("Реле настроено · сигнал стал ровнее")
+		else:
+			relay_tuned = false
+			var can_take_scrap := pack_used() < PACK_LIMIT
+			if can_take_scrap:
+				wood += 1
+			if can_take_scrap:
+				_add_log("Ты разобрал реле. Ветер унёс позывной, зато в сумке появилась сухая обмотка.")
+				notice.emit("Реле разобрано · найден материал для костра")
+			else:
+				_add_log("Ты разобрал реле, но сумка полна. Ветер унёс позывной.")
+				notice.emit("Реле разобрано, но сумка полна")
+	elif event == "echo":
+		if choice == 0:
+			echo_heard = true
+			energy = maxi(0, energy - 1)
+			elapsed += 1
+			_reveal(3.6)
+			_add_log("На старом телефоне пойман позывной: «Не гаси огонь». Ты записал его в журнал.")
+			notice.emit("Позывной записан · открыта часть карты")
+		else:
+			_add_log("Ты прошёл мимо телефона. Голос оборвался, не успев назвать позывной.")
+			notice.emit("Линия умолкла")
 	else:
 		survivor_found = true
 		elapsed += 1
@@ -444,10 +493,17 @@ func _finish(victory: bool, custom_title: String = "", custom_body: String = "",
 		var completed := campaign_chapter
 		var summaries := ["Ты принёс сигнальный модуль. Маяк зажёгся над северным лесом.", "Три фрагмента собраны. В повторяющемся сигнале слышно имя пропавшего следопыта.", "Следопыт спасён и вернулся в лагерь." if survivor_rescued else "Ты вернулся за поисковой группой; координаты следопыта теперь у спасателей."]
 		campaign_records.push_front(summaries[mini(completed, summaries.size() - 1)])
+		if completed == 0 and echo_heard:
+			campaign_records.push_front("Ты сохранил позывной неизвестного голоса.")
+		elif completed == 1 and relay_tuned:
+			campaign_records.push_front("Ты оставил ветровое реле работать на старой частоте.")
 		campaign_chapter = mini(campaign_chapter + 1, CHAPTER_COUNT)
 		if campaign_chapter >= CHAPTER_COUNT:
 			result_title = "Вместе сквозь туман" if survivor_rescued else "Сигнал найден"
-			result_body = "Следопыт вернулся домой, а маяк снова ведёт путников через перевал. В рации впервые за много недель слышен смех." if survivor_rescued else "Поисковая группа добралась до указанных координат. Маяк горит, и теперь никто не потеряется в северном лесу."
+			if survivor_rescued:
+				result_body = "Следопыт вернулся домой, а маяк снова ведёт путников через перевал. " + ("На старой частоте он ещё раз слышит тот тихий голос: это была его сестра, звавшая его домой." if echo_heard and relay_tuned else "В рации впервые за много недель слышен смех.")
+			else:
+				result_body = "Поисковая группа добралась до указанных координат. " + ("Сохранённый позывной помог ей пройти перевал до рассвета." if relay_tuned else "Маяк горит, и теперь никто не потеряется в северном лесу.")
 			result_icon = "✦"
 		else:
 			var chapter_titles := ["Сигнал найден", "Три осколка", "Глава завершена"]
@@ -469,7 +525,7 @@ func _add_log(line: String) -> void:
 		journal.pop_back()
 
 func to_dict() -> Dictionary:
-	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "campaign_chapter": campaign_chapter, "fragments": fragments, "survivor_found": survivor_found, "survivor_rescued": survivor_rescued, "campaign_records": campaign_records, "result_title": result_title, "result_body": result_body, "result_icon": result_icon, "journal": journal}
+	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "campaign_chapter": campaign_chapter, "fragments": fragments, "survivor_found": survivor_found, "survivor_rescued": survivor_rescued, "echo_heard": echo_heard, "relay_tuned": relay_tuned, "campaign_records": campaign_records, "result_title": result_title, "result_body": result_body, "result_icon": result_icon, "journal": journal}
 
 func from_dict(data: Dictionary) -> void:
 	if not data.has("grid") or not data.has("position"):
@@ -498,6 +554,8 @@ func from_dict(data: Dictionary) -> void:
 	fragments = int(data.get("fragments", 0))
 	survivor_found = bool(data.get("survivor_found", false))
 	survivor_rescued = bool(data.get("survivor_rescued", false))
+	echo_heard = bool(data.get("echo_heard", false))
+	relay_tuned = bool(data.get("relay_tuned", false))
 	campaign_records.clear()
 	for record in data.get("campaign_records", []):
 		campaign_records.append(str(record))
