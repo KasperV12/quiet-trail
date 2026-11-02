@@ -4,6 +4,7 @@ class_name ExpeditionState
 signal changed
 signal notice(text: String)
 signal finished(won: bool, title: String, body: String, icon: String)
+signal encountered(title: String, body: String, first_choice: String, second_choice: String, icon: String)
 
 const MAP_W := 10
 const MAP_H := 8
@@ -24,6 +25,7 @@ var discoveries := 0
 var ended := false
 var won := false
 var campfires: Array[Vector2i] = []
+var pending_encounter := ""
 var journal: Array[String] = []
 var rng := RandomNumberGenerator.new()
 
@@ -43,6 +45,7 @@ func reset() -> void:
 	ended = false
 	won = false
 	campfires.clear()
+	pending_encounter = ""
 	journal.clear()
 	grid.clear()
 	for y in range(MAP_H):
@@ -66,6 +69,8 @@ func reset() -> void:
 	_place_find("food", ["forest", "clearing", "stream"])
 	_place_find("notes", ["ridge", "ruin"])
 	_place_find("notes", ["ridge", "ruin"])
+	_place_find("event:radio", ["forest", "clearing", "stream"])
+	_place_find("event:cabin", ["forest", "ridge", "clearing"])
 	_tile(CAMP)["seen"] = true
 	_tile(CAMP)["visited"] = true
 	_reveal()
@@ -96,11 +101,11 @@ func _place_find(found: String, allowed_kinds: Array) -> void:
 	if not candidates.is_empty():
 		_tile(candidates[rng.randi_range(0, candidates.size() - 1)])["found"] = found
 
-func _reveal() -> void:
+func _reveal(radius: float = 2.45) -> void:
 	for y in range(MAP_H):
 		for x in range(MAP_W):
 			var cell := Vector2i(x, y)
-			if position.distance_to(cell) <= 2.45:
+			if position.distance_to(cell) <= radius:
 				_tile(cell)["seen"] = true
 
 func pack_used() -> int:
@@ -128,7 +133,7 @@ func weather_text() -> String:
 	return "Туман рассеивается"
 
 func move(delta: Vector2i) -> void:
-	if ended:
+	if ended or pending_encounter != "":
 		return
 	if abs(delta.x) + abs(delta.y) != 1:
 		return
@@ -165,7 +170,11 @@ func _collect() -> void:
 	var item: String = _tile(position)["found"]
 	if item == "":
 		return
-	if item == "module" and not has_module:
+	if item.begins_with("event:"):
+		pending_encounter = item.trim_prefix("event:")
+		_tile(position)["found"] = ""
+		present_pending_encounter()
+	elif item == "module" and not has_module:
 		has_module = true
 		discoveries += 1
 		_add_log("В обсерватории найден сигнальный модуль. Он всё ещё тёплый.")
@@ -188,6 +197,56 @@ func _collect() -> void:
 		_tile(position)["found"] = ""
 		_add_log("В камнях обнаружена страница старого журнала.")
 		notice.emit("Страница журнала найдена")
+
+func present_pending_encounter() -> void:
+	if pending_encounter == "radio":
+		encountered.emit("Голос из старого радио", "Среди помех проступает спокойный голос: «Если слышишь это, северный склон ещё проходим. Ищи огни у воды». Можно задержаться и разобрать координаты или не рисковать зарядом фонаря.", "Настроить частоту · −1 сила", "Идти дальше", "⌁")
+	elif pending_encounter == "cabin":
+		encountered.emit("Лесной кордон", "Под еловыми лапами прячется старая сторожка. Внутри сухо, но крыша тихо оседает под тяжестью снега. Можно осмотреть ящик с припасами или передохнуть под навесом.", "Обыскать ящик · −1 сила", "Передохнуть · +2 силы", "⌂")
+
+func resolve_encounter(choice: int) -> void:
+	if pending_encounter == "":
+		return
+	var event := pending_encounter
+	pending_encounter = ""
+	if event == "radio":
+		if choice == 0:
+			energy = maxi(0, energy - 1)
+			elapsed += 1
+			_reveal(3.6)
+			if notes < 2 and pack_used() < PACK_LIMIT:
+				notes += 1
+				discoveries += 1
+			_add_log("В эфире пойманы координаты северного склона. На полях журнала появилась пометка.")
+			notice.emit("Координаты записаны · открыта часть карты")
+		else:
+			_add_log("Радио стихло, оставив только шорох помех.")
+			notice.emit("Ты оставил радио в покое")
+	else:
+		if choice == 0:
+			energy = maxi(0, energy - 1)
+			elapsed += 1
+			if pack_used() < PACK_LIMIT:
+				if rng.randf() < .5:
+					food += 1
+					_add_log("В сторожке нашлась жестяная коробка с сухим пайком.")
+					notice.emit("Найден сухой паёк · +1 еда")
+				else:
+					wood += 1
+					_add_log("В сторожке нашлись сухие щепки для костра.")
+					notice.emit("Сухие щепки · +1 ветки")
+			else:
+				_add_log("Ящик оказался пуст, но под навесом удалось перевести дух.")
+				notice.emit("Ящик пуст · находки некуда положить")
+		else:
+			energy = mini(MAX_ENERGY, energy + 2)
+			elapsed += 1
+			_add_log("Крыша сторожки укрыла от ветра. Восстановлено 2 ед. сил.")
+			notice.emit("Передышка под навесом · +2 силы")
+	if energy <= 0 and position != CAMP:
+		_finish(false, "Тишина в эфире", "Последних сил не хватило на обратный путь. Утром в лес отправится поисковая группа.", "…")
+	else:
+		changed.emit()
 
 func eat_food() -> void:
 	if ended:
@@ -284,7 +343,7 @@ func _add_log(line: String) -> void:
 		journal.pop_back()
 
 func to_dict() -> Dictionary:
-	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "journal": journal}
+	return {"grid": grid, "position": [position.x, position.y], "energy": energy, "wood": wood, "food": food, "notes": notes, "has_module": has_module, "elapsed": elapsed, "discoveries": discoveries, "ended": ended, "won": won, "campfires": campfires.map(func(c): return [c.x, c.y]), "pending_encounter": pending_encounter, "journal": journal}
 
 func from_dict(data: Dictionary) -> void:
 	if not data.has("grid") or not data.has("position"):
@@ -308,6 +367,7 @@ func from_dict(data: Dictionary) -> void:
 	for cell: Array in data.get("campfires", []):
 		if cell.size() >= 2:
 			campfires.append(Vector2i(int(cell[0]), int(cell[1])))
+	pending_encounter = str(data.get("pending_encounter", ""))
 	journal.clear()
 	for line in data.get("journal", []):
 		journal.append(str(line))

@@ -34,6 +34,7 @@ func _ready() -> void:
 	state.changed.connect(_on_state_changed)
 	state.notice.connect(_show_notice)
 	state.finished.connect(_on_finished)
+	state.encountered.connect(_on_encountered)
 	_update_ui()
 	_show_title_screen()
 	get_viewport().size_changed.connect(_on_viewport_resized)
@@ -325,6 +326,13 @@ func _show_finished(won: bool, title: String, body: String, icon: String) -> voi
 		state.reset()
 		_start_game(), true, icon)
 
+func _on_encountered(title: String, body: String, first_choice: String, second_choice: String, icon: String) -> void:
+	_show_dialog("СЛУЧАЙ В ЛЕСУ", title, body, first_choice, func():
+		overlay.visible = false
+		state.resolve_encounter(0), second_choice, func():
+		overlay.visible = false
+		state.resolve_encounter(1), true, icon)
+
 func _show_dialog(kicker: String, title: String, body_text: String, primary_text: String, primary_action: Callable, secondary_text: String = "", secondary_action: Callable = Callable(), show_secondary: bool = false, icon: String = "✦") -> void:
 	for child in overlay.get_children():
 		child.queue_free()
@@ -373,6 +381,8 @@ func _start_game() -> void:
 	_update_ui()
 	_save_game()
 	map_view.grab_focus()
+	if state.pending_encounter != "":
+		state.present_pending_encounter()
 
 func _save_game() -> void:
 	if state == null:
@@ -443,7 +453,7 @@ func _on_viewport_resized() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if overlay.visible:
-		if event.is_action_pressed("ui_cancel"):
+		if event.is_action_pressed("ui_cancel") and state.pending_encounter == "":
 			overlay.visible = false
 			get_viewport().set_input_as_handled()
 		return
