@@ -32,6 +32,8 @@ var fire_button: Button
 var sound_button: Button
 var ambience_player: AudioStreamPlayer
 var audio_enabled := true
+var ambience_volume := 0.65
+var reduced_motion := false
 var closing := false
 var card_style: StyleBoxFlat
 var main_font: Font
@@ -344,9 +346,10 @@ func _show_pause() -> void:
 	if overlay.visible:
 		return
 	_save_game()
-	_show_dialog("ПАУЗА", "Лес подождёт", "Прогресс сохранён. Можно продолжить путь или вернуться в главное меню.", "ПРОДОЛЖИТЬ", func(): overlay.visible = false, "СОХРАНИТЬ И ВЫЙТИ", func():
-		_save_game()
-		_show_title_screen(), true, "Ⅱ")
+	_show_pause_dialog()
+
+func _show_pause_dialog() -> void:
+	_show_dialog("ПАУЗА", "Лес подождёт", "Прогресс сохранён автоматически.", "ПРОДОЛЖИТЬ", func(): overlay.visible = false, "НАСТРОЙКИ", func(): _show_settings(true), true, "Ⅱ")
 
 func _show_finished(won: bool, title: String, body: String, icon: String) -> void:
 	_save_game()
@@ -409,6 +412,10 @@ func _show_dialog(kicker: String, title: String, body_text: String, primary_text
 		secondary.pressed.connect(secondary_action)
 		actions.add_child(secondary)
 	if kicker == "ТИХАЯ ТРОПА":
+		var options := _small_button("⚙  НАСТРОЙКИ")
+		options.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		options.pressed.connect(func(): _show_settings(false))
+		col.add_child(options)
 		var controls := _label("WASD / СТРЕЛКИ — идти     R — отдых     F — еда     C — костёр     B — лагерь", 9, Color("#89988b"))
 		controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		col.add_child(controls)
@@ -449,20 +456,94 @@ func _load_audio_setting() -> void:
 			var settings: Variant = JSON.parse_string(file.get_as_text())
 			if settings is Dictionary:
 				audio_enabled = bool(settings.get("ambience", true))
+				ambience_volume = clampf(float(settings.get("ambience_volume", 0.65)), 0.0, 1.0)
+				reduced_motion = bool(settings.get("reduced_motion", false))
+	if is_instance_valid(map_view):
+		map_view.reduced_motion = reduced_motion
 	_apply_audio_setting()
 
 func _apply_audio_setting() -> void:
 	if is_instance_valid(ambience_player):
-		ambience_player.volume_db = -13.0 if audio_enabled else -80.0
+		ambience_player.volume_db = linear_to_db(lerpf(0.0, 0.42, ambience_volume)) if audio_enabled and ambience_volume > 0.0 else -80.0
 	if is_instance_valid(sound_button):
 		sound_button.text = "♫ ЗВУК" if audio_enabled else "♫ ВЫКЛ"
 
 func _toggle_audio() -> void:
 	audio_enabled = not audio_enabled
+	_save_settings()
+	_apply_audio_setting()
+
+func _save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if file != null:
-		file.store_string(JSON.stringify({"ambience": audio_enabled}))
-	_apply_audio_setting()
+		file.store_string(JSON.stringify({"ambience": audio_enabled, "ambience_volume": ambience_volume, "reduced_motion": reduced_motion}))
+
+func _show_settings(from_pause: bool) -> void:
+	for child in overlay.get_children():
+		child.queue_free()
+	overlay.visible = true
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(500, 0)
+	panel.add_theme_stylebox_override("panel", _panel_style(Color("#1b2821"), 22))
+	center.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	panel.add_child(col)
+	var icon := _label("⚙", 30, Color("#e8c17f"), true)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(icon)
+	var heading := _label("НАСТРОЙКИ", 18, Color("#f0f1e8"), true)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(heading)
+	col.add_child(_label("ГРОМКОСТЬ ЛЕСА", 9, Color("#d1a766"), true))
+	var volume_row := HBoxContainer.new()
+	volume_row.add_theme_constant_override("separation", 10)
+	col.add_child(volume_row)
+	var volume_slider := HSlider.new()
+	volume_slider.min_value = 0.0
+	volume_slider.max_value = 100.0
+	volume_slider.step = 1.0
+	volume_slider.value = ambience_volume * 100.0
+	volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	volume_row.add_child(volume_slider)
+	var volume_value := _label("%d%%" % roundi(ambience_volume * 100.0), 10, Color("#e0e7dc"), true)
+	volume_value.custom_minimum_size.x = 40
+	volume_row.add_child(volume_value)
+	volume_slider.value_changed.connect(func(value: float):
+		ambience_volume = value / 100.0
+		volume_value.text = "%d%%" % roundi(value)
+		_apply_audio_setting()
+		_save_settings())
+	var motion := CheckButton.new()
+	motion.text = "Снизить движение на карте"
+	motion.button_pressed = reduced_motion
+	motion.add_theme_font_size_override("font_size", 11)
+	motion.add_theme_color_override("font_color", Color("#dce4d8"))
+	col.add_child(motion)
+	var motion_hint := _label("Убирает покачивание деталей и плавный переход путника.", 10, Color("#9eaa9d"))
+	motion_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(motion_hint)
+	motion.toggled.connect(func(enabled: bool):
+		reduced_motion = enabled
+		map_view.reduced_motion = enabled
+		_save_settings()
+		map_view.queue_redraw())
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 9)
+	col.add_child(buttons)
+	var back := _dialog_button("НАЗАД", true)
+	back.pressed.connect(func(): _show_pause_dialog() if from_pause else _show_title_screen())
+	buttons.add_child(back)
+	if from_pause:
+		var menu := _dialog_button("В ГЛАВНОЕ МЕНЮ", false)
+		menu.pressed.connect(func():
+			_save_game()
+			_show_title_screen())
+		buttons.add_child(menu)
 
 func _load_game() -> void:
 	if not FileAccess.file_exists(SAVE_PATH):

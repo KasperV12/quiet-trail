@@ -26,6 +26,7 @@ var player_visual_pos := Vector2.ZERO
 var player_move_from := Vector2.ZERO
 var player_move_to := Vector2.ZERO
 var player_move_time := 1.0
+var reduced_motion := false
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(650, 520)
@@ -38,8 +39,12 @@ func _ready() -> void:
 	set_process(true)
 
 func _process(delta: float) -> void:
-	pulse += delta
-	if player_move_time < 1.0:
+	if not reduced_motion:
+		pulse += delta
+	if reduced_motion:
+		player_visual_pos = player_move_to
+		player_move_time = 1.0
+	elif player_move_time < 1.0:
 		player_move_time = minf(1.0, player_move_time + delta / 0.19)
 		var t := player_move_time * player_move_time * (3.0 - 2.0 * player_move_time)
 		player_visual_pos = player_move_from.lerp(player_move_to, t)
@@ -51,7 +56,9 @@ func _on_state_changed() -> void:
 		return
 	player_move_from = player_visual_pos
 	player_move_to = next_position
-	player_move_time = 0.0
+	player_move_time = 1.0 if reduced_motion else 0.0
+	if reduced_motion:
+		player_visual_pos = next_position
 
 func _draw() -> void:
 	var bounds := Rect2(Vector2.ZERO, size)
