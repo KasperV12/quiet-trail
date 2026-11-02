@@ -40,6 +40,7 @@ var main_font: Font
 
 func _ready() -> void:
 	state = ExpeditionStateScript.new()
+	_configure_controls()
 	main_font = ThemeDB.fallback_font
 	_build_ui()
 	state.changed.connect(_on_state_changed)
@@ -184,7 +185,7 @@ func _build_body(parent: VBoxContainer) -> void:
 	map_view.cell_selected.connect(_on_cell_selected)
 	map_view.notice.connect(_show_notice)
 	map_column.add_child(map_view)
-	var map_help := _label("КЛИКНИ ПО СОСЕДНЕМУ УЧАСТКУ   ·   WASD / СТРЕЛКИ — ДВИЖЕНИЕ", 9, Color("#99a694"))
+	var map_help := _label("КЛИК ПО СОСЕДНЕМУ УЧАСТКУ   ·   WASD / СТРЕЛКИ / ЛЕВЫЙ СТИК — ДВИЖЕНИЕ", 9, Color("#99a694"))
 	map_column.add_child(map_help)
 	var side := VBoxContainer.new()
 	side.custom_minimum_size.x = 292
@@ -416,7 +417,7 @@ func _show_dialog(kicker: String, title: String, body_text: String, primary_text
 		options.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		options.pressed.connect(func(): _show_settings(false))
 		col.add_child(options)
-		var controls := _label("WASD / СТРЕЛКИ — идти     R — отдых     F — еда     C — костёр     B — лагерь", 9, Color("#89988b"))
+		var controls := _label("WASD / СТРЕЛКИ / ЛЕВЫЙ СТИК — идти\nR / Y — отдых     F / X — еда     C / A — костёр\nB — пауза     B / RB — лагерь", 9, Color("#89988b"))
 		controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		col.add_child(controls)
 
@@ -639,15 +640,66 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_left") or event.is_action_pressed("move_left"):
 		state.move(Vector2i.LEFT)
 		get_viewport().set_input_as_handled()
-	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_R:
-			state.rest()
-		elif event.keycode == KEY_F:
-			state.eat_food()
-		elif event.keycode == KEY_C:
-			state.build_campfire()
-		elif event.keycode == KEY_B:
-			state.return_to_camp()
+	elif event.is_action_pressed("expedition_rest"):
+		state.rest()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("expedition_food"):
+		state.eat_food()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("expedition_fire"):
+		state.build_campfire()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("expedition_return"):
+		state.return_to_camp()
+		get_viewport().set_input_as_handled()
+
+func _configure_controls() -> void:
+	for direction in ["up", "right", "down", "left"]:
+		var move_action: String = "move_" + str(direction)
+		if not InputMap.has_action(move_action):
+			InputMap.add_action(move_action, 0.22)
+	var up_key := _key_binding(KEY_W)
+	var right_key := _key_binding(KEY_D)
+	var down_key := _key_binding(KEY_S)
+	var left_key := _key_binding(KEY_A)
+	var up_pad := _pad_button(JOY_BUTTON_DPAD_UP)
+	var right_pad := _pad_button(JOY_BUTTON_DPAD_RIGHT)
+	var down_pad := _pad_button(JOY_BUTTON_DPAD_DOWN)
+	var left_pad := _pad_button(JOY_BUTTON_DPAD_LEFT)
+	var stick_up := _pad_axis(JOY_AXIS_LEFT_Y, -1.0)
+	var stick_right := _pad_axis(JOY_AXIS_LEFT_X, 1.0)
+	var stick_down := _pad_axis(JOY_AXIS_LEFT_Y, 1.0)
+	var stick_left := _pad_axis(JOY_AXIS_LEFT_X, -1.0)
+	_add_action_bindings("move_up", [up_key, up_pad, stick_up])
+	_add_action_bindings("move_right", [right_key, right_pad, stick_right])
+	_add_action_bindings("move_down", [down_key, down_pad, stick_down])
+	_add_action_bindings("move_left", [left_key, left_pad, stick_left])
+	_add_action_bindings("expedition_rest", [_key_binding(KEY_R), _pad_button(JOY_BUTTON_Y)])
+	_add_action_bindings("expedition_food", [_key_binding(KEY_F), _pad_button(JOY_BUTTON_X)])
+	_add_action_bindings("expedition_fire", [_key_binding(KEY_C), _pad_button(JOY_BUTTON_A)])
+	_add_action_bindings("expedition_return", [_key_binding(KEY_B), _pad_button(JOY_BUTTON_RIGHT_SHOULDER)])
+
+func _add_action_bindings(action: String, bindings: Array) -> void:
+	if not InputMap.has_action(action):
+		InputMap.add_action(action, 0.22)
+	for binding: InputEvent in bindings:
+		InputMap.action_add_event(action, binding)
+
+func _key_binding(code: Key) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.physical_keycode = code
+	return event
+
+func _pad_button(button: JoyButton) -> InputEventJoypadButton:
+	var event := InputEventJoypadButton.new()
+	event.button_index = button
+	return event
+
+func _pad_axis(axis: JoyAxis, value: float) -> InputEventJoypadMotion:
+	var event := InputEventJoypadMotion.new()
+	event.axis = axis
+	event.axis_value = value
+	return event
 
 func _label(text_value: String, font_size: int, color: Color, bold: bool = false) -> Label:
 	var label := Label.new()
